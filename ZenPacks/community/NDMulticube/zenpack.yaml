@@ -1,0 +1,23 @@
+name: ZenPacks.community.NDMulticube
+
+classes:
+  MulticubeDevice:
+    base: [zenpacklib.Device]
+    label: Multicube
+  MulticubeModule:
+    base: [zenpacklib.Component]
+    label: Module
+    monitoring_templates: [MulticubeModule]
+    properties:
+      channel:
+        label: Channel
+
+device_classes:
+  /Environment/ND Metering/Multicube:
+    zProperties:
+      zPythonClass: ZenPacks.community.NDMulticube.MulticubeDevice
+      zCollectorPlugins:
+        - community.snmp.MulticubeModuleMap
+
+class_relationships:
+  - MulticubeDevice 1:MC MulticubeModule        

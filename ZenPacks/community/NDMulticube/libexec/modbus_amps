@@ -1,0 +1,128 @@
+#!/usr/bin/perl
+
+use strict;
+use MBclient;
+use Data::Dumper;
+use Cwd 'abs_path';
+
+my $debug = 0;
+
+my %kscale = qw(
+	1	0.01
+	2	0.1
+	3	1
+	4	10
+	5	100
+	6	1000
+	7	10000
+);
+
+
+my $config = 0;
+
+my $host = $ARGV[0];
+my $node = $host;
+my $response;
+my $first = 1;
+my $component;
+
+if($ARGV[1] eq "model") {
+	$config = "1"
+}
+else {
+	$component = $ARGV[1]
+}
+
+
+my $m = MBclient->new();
+# define server target
+$m->host($host);
+$m->unit_id(1);
+my $words;
+my $name = getName(30 * 256 + 0);
+
+$words = $m->read_holding_registers(7704, 3);
+my $slaveCount = @$words[0];
+# printf "slaveCount %d\n", $slaveCount;
+
+my $singlephaseMap = (@$words[1] << 16) | @$words[2];
+printf "singlephaseMap %X\n", $singlephaseMap if $debug;
+
+my @phases;
+
+foreach my $slave (1..$slaveCount) {
+	if (($singlephaseMap >> ($slave - 1)) & 0x1) {
+		$phases[$slave] = 1;
+	} else {
+		$phases[$slave] = 3;
+	}
+	getSlaveInstant2($slave);
+}
+
+if ($config == 0){
+	printf "OK|";
+}
+$m->close();
+exit 0;
+
+sub getName
+{
+	my $offset = shift;
+	my $words = $m->read_holding_registers($offset, 7);
+	my $name = '';
+	foreach my $word (@$words) {
+		my $lo = $word & 0x00ff;
+		my $hi = ($word >> 8) & 0xffff;
+		if ($hi == 0) { last; } else { $name .= chr($hi); }
+		if ($lo == 0) { last; } else { $name .= chr($lo); }
+	}
+	$name =~ s/<//g;
+	$name =~ s/>//g;
+	$name =~ s/^ +//;
+	$name;
+}
+
+sub getSlaveInstant2
+{
+	my $slave = shift;
+
+	$m->unit_id($slave + 1);
+
+	my $phase;
+	my @label;
+	if ($config == 1) {
+		foreach $phase (1..3) {
+			$label[$phase] = getName(7170 + ($phase - 1) * 7);
+			$label[$phase] = 'No name' unless $label[$phase];
+			printf "unit%02damps%d,%s\n", $slave, $phase, $label[$phase];
+			}
+		return
+        }
+
+	my (@amps, $ki, @Amps);
+	if ($phases[$slave] == 1) {
+		$words = $m->read_holding_registers(7936, 41);
+		@amps = @$words[27..29];
+		$ki = @$words[35];
+	} elsif ($phases[$slave] == 3) {
+		$words = $m->read_holding_registers(7680, 58);
+		@amps = @$words[8..10];
+		$ki = @$words[53];
+	} else {
+		return;
+	}
+	# print "Slave $slave - strange ki $ki\n" unless $kscale{$ki};
+	@Amps = map { $_ * $kscale{$ki} } @amps;
+
+	foreach $phase (1..3) {
+		my $unit = sprintf("unit%02damps%d", $slave, $phase);
+		my $path = "/opt/zenoss/ZenPacks/ZenPacks.community.NDMulticube/ZenPacks/community/NDMulticube/libexec/";
+		open (my $fh, '>', $path . $host . "-" . $unit);
+		
+		printf $fh "OK|amps=%.1f \n", $Amps[$phase - 1];
+                close $fh
+	}
+}
+
+__DATA__
+
